@@ -1062,6 +1062,7 @@ dependencies = [
  "futures",
  "futures-util",
  "lazy_static",
+ "nu-ansi-term",
  "parking_lot",
  "prometheus",
  "protobuf",

@@ -113,6 +113,9 @@ fn parse_voice_distance(value: &str) -> Result<f32, String> {
 #[tokio::main]
 async fn main() {
     // let console_layer = console_subscriber::spawn();
+    // cmd.exe prints the log color codes as-is unless virtual terminal processing is enabled
+    #[cfg(target_os = "windows")]
+    let _ = nu_ansi_term::enable_ansi_support();
     tracing_subscriber::fmt::init();
 
     let args = Args::parse();
