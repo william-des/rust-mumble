@@ -212,7 +212,7 @@ async fn handle_packet(
     };
 
     let session_id = client.session_id;
-    let client_packet = packet.into_client_bound(session_id, state.remove_positional_data);
+    let client_packet = packet.into_client_bound(session_id, state.remove_positional_data, state.max_voice_distance);
 
     match &client_packet {
         VoicePacket::Ping { .. } => {

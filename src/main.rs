@@ -36,6 +36,7 @@ use crate::http::create_http_server;
 use crate::proto::mumble::Version;
 use crate::server::{create_tcp_server, create_udp_server};
 use crate::state::ServerState;
+use crate::voice::MIN_VOICE_DISTANCE;
 
 use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
@@ -73,6 +74,10 @@ struct Args {
     /// mumble position and other information from the packet.
     #[clap(long)]
     strip_mumble_position: bool,
+    /// Maximum distance (in meters) a client can be heard from. FiveM clients send their voice distance
+    /// with each voice packet, higher, unset or invalid distances will be clamped to this value.
+    #[clap(long, value_parser = parse_voice_distance, conflicts_with = "strip_mumble_position")]
+    max_voice_distance: Option<f32>,
     /// Use TLS for the http server (https), will use the same certificate as the mumble server
     #[clap(long)]
     https: bool,
@@ -98,6 +103,13 @@ struct Args {
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn parse_voice_distance(value: &str) -> Result<f32, String> {
+    match value.parse::<f32>() {
+        Ok(distance) if distance.is_finite() && distance >= MIN_VOICE_DISTANCE => Ok(distance),
+        _ => Err(format!("expected a number >= {MIN_VOICE_DISTANCE}")),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // let console_layer = console_subscriber::spawn();
@@ -107,6 +119,10 @@ async fn main() {
 
     if let Some(restrict) = &args.restrict_to_version {
         tracing::info!("Restricting client version to {}", restrict);
+    }
+
+    if let Some(max_distance) = args.max_voice_distance {
+        tracing::info!("Clamping client voice distance to {}", max_distance);
     }
 
     let config = Arc::new(generate_rustls_cert());
@@ -130,6 +146,7 @@ async fn main() {
 
     let state = Arc::new(ServerState::new(
         args.strip_mumble_position,
+        args.max_voice_distance,
         args.restrict_to_version,
         args.single_user_temporary_channels,
     ));

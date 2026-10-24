@@ -93,7 +93,8 @@ impl MessageHandler {
                     }
                 };
 
-                let output_voice_packet = voice_packet.into_client_bound(client.session_id, state.remove_positional_data);
+                let output_voice_packet =
+                    voice_packet.into_client_bound(client.session_id, state.remove_positional_data, state.max_voice_distance);
 
                 output_voice_packet.handle(state, client).await.context("kind: UDPTunnel")
             }

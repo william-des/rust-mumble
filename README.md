@@ -41,6 +41,8 @@ Options:
           User for the http server api basic authentification [default: admin]
       --http-password <HTTP_PASSWORD>
           Password for the http server api basic authentification
+      --max-voice-distance <MAX_VOICE_DISTANCE>
+          Maximum distance (in meters) a client can be heard from. FiveM clients send their voice distance with each voice packet, higher, unset or invalid distances will be clamped to this value
       --https
           Use TLS for the http server (https), will use the same certificate as the mumble server
       --http-log

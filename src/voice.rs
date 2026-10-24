@@ -10,9 +10,15 @@ use std::fmt::Debug;
 use std::io;
 use std::io::{Cursor, Read};
 use std::marker::PhantomData;
+use std::ops::Range;
 
 use super::varint::BufMutExt;
 use super::varint::ReadExt;
+
+/// FiveM clients append their voice distance (little-endian f32) after the placeholder position.
+const VOICE_DISTANCE_RANGE: Range<usize> = 12..16;
+/// FiveM clients treat a voice distance below this as unset, which means unlimited range.
+pub const MIN_VOICE_DISTANCE: f32 = 0.01;
 
 /// A packet transmitted via Mumble's voice channel.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,7 +111,12 @@ impl VoicePacketDst for ClientBound {
 }
 
 impl VoicePacket<ServerBound> {
-    pub fn into_client_bound(self, session_id: u32, remove_positional_data: bool) -> VoicePacket<ClientBound> {
+    pub fn into_client_bound(
+        self,
+        session_id: u32,
+        remove_positional_data: bool,
+        max_voice_distance: Option<f32>,
+    ) -> VoicePacket<ClientBound> {
         match self {
             VoicePacket::Ping { timestamp } => VoicePacket::Ping { timestamp },
             VoicePacket::Audio {
@@ -120,10 +131,34 @@ impl VoicePacket<ServerBound> {
                 session_id,
                 seq_num,
                 payload,
-                position_info: if remove_positional_data { None } else { position_info },
+                position_info: if remove_positional_data {
+                    None
+                } else if let Some(max_distance) = max_voice_distance {
+                    Some(clamp_voice_distance(position_info, max_distance))
+                } else {
+                    position_info
+                },
             },
         }
     }
+}
+
+/// Makes sure the voice distance sent along the position is within `MIN_VOICE_DISTANCE..=max_distance`
+/// so a client can't make itself heard further away. Packets without a distance get `max_distance`,
+/// otherwise receivers would keep the last distance they got (or none at all, which is unlimited).
+fn clamp_voice_distance(position_info: Option<Bytes>, max_distance: f32) -> Bytes {
+    let info = position_info.unwrap_or_default();
+
+    if let Some(distance) = info.get(VOICE_DISTANCE_RANGE).map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+        && (MIN_VOICE_DISTANCE..=max_distance).contains(&distance)
+    {
+        return info;
+    }
+
+    let mut clamped = BytesMut::from(info.as_ref());
+    clamped.resize(info.len().max(VOICE_DISTANCE_RANGE.end), 0);
+    clamped[VOICE_DISTANCE_RANGE].copy_from_slice(&max_distance.to_le_bytes());
+    clamped.freeze()
 }
 
 pub fn decode_voice_packet<DecodeDst: VoicePacketDst>(buf_mut: &mut BytesMut) -> Result<VoicePacket<DecodeDst>, DecryptError> {
@@ -244,5 +279,54 @@ pub fn encode_voice_packet<EncodeDst: VoicePacketDst>(item: &VoicePacket<EncodeD
                 dst.extend_from_slice(bytes);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn position_info(distance: f32) -> Bytes {
+        let mut info = BytesMut::from(&[0u8; 12][..]);
+        info.extend_from_slice(&distance.to_le_bytes());
+        info.freeze()
+    }
+
+    fn distance_of(info: &Bytes) -> f32 {
+        f32::from_le_bytes(info[VOICE_DISTANCE_RANGE].try_into().unwrap())
+    }
+
+    #[test]
+    fn keeps_distance_within_limit() {
+        let info = position_info(15.0);
+        assert_eq!(clamp_voice_distance(Some(info.clone()), 50.0), info);
+    }
+
+    #[test]
+    fn clamps_out_of_range_distances() {
+        for distance in [1000.0, 0.0, 0.005, -1000.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(distance_of(&clamp_voice_distance(Some(position_info(distance)), 50.0)), 50.0);
+        }
+    }
+
+    #[test]
+    fn adds_distance_when_missing() {
+        let clamped = clamp_voice_distance(None, 50.0);
+        assert_eq!(clamped.len(), 16);
+        assert_eq!(distance_of(&clamped), 50.0);
+
+        let position = Bytes::from_static(&[1u8; 12]);
+        let clamped = clamp_voice_distance(Some(position), 50.0);
+        assert_eq!(&clamped[..12], &[1u8; 12]);
+        assert_eq!(distance_of(&clamped), 50.0);
+    }
+
+    #[test]
+    fn keeps_trailing_data() {
+        let mut info = BytesMut::from(position_info(1000.0).as_ref());
+        info.extend_from_slice(&[7, 8]);
+        let clamped = clamp_voice_distance(Some(info.freeze()), 50.0);
+        assert_eq!(distance_of(&clamped), 50.0);
+        assert_eq!(&clamped[16..], &[7, 8]);
     }
 }

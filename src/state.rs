@@ -64,6 +64,8 @@ pub type ServerStateRef = Arc<ServerState>;
 
 pub struct ServerState {
     pub remove_positional_data: bool,
+    /// Maximum voice distance relayed to other clients, see `voice::clamp_voice_distance`
+    pub max_voice_distance: Option<f32>,
     /// Only allow a single client to be inside of a temporary channel at a time
     pub single_user_temporary_channels: bool,
     pub clients: ConcurrentHashMap<u32, ClientArc>,
@@ -83,7 +85,12 @@ pub struct ServerState {
 }
 
 impl ServerState {
-    pub fn new(remove_positional_data: bool, restrict_to_version: Option<String>, single_user_temporary_channels: bool) -> Self {
+    pub fn new(
+        remove_positional_data: bool,
+        max_voice_distance: Option<f32>,
+        restrict_to_version: Option<String>,
+        single_user_temporary_channels: bool,
+    ) -> Self {
         let channels = ConcurrentHashMap::new();
         let _ = channels.insert(
             0,
@@ -92,6 +99,7 @@ impl ServerState {
 
         Self {
             remove_positional_data,
+            max_voice_distance,
             single_user_temporary_channels,
             // we preallocate the maximum amount of clients to prevent the possibility of resizes
             // later, which will prevent double-sends in certain situations
